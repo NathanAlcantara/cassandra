@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+#
+# cassie — CLI for Cassandra, the resource-bottleneck monitor.
+#
+# Cassandra sees the bottlenecks before anyone else and records the evidence.
+# This CLI is the shortcut to operate the service and generate the reports.
+#
+set -euo pipefail
+
+# Directory where Cassandra is installed (project root).
+CASSIE_HOME="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+SERVICE="cassandra.service"
+PY="/usr/bin/python3"
+
+usage() {
+    cat <<EOF
+cassie — Cassandra, a lightweight resource-bottleneck monitor
+
+Usage: cassie <command> [args]
+
+Commands:
+  start            Start monitoring in the background (user service)
+  stop             Stop monitoring
+  restart          Restart (applies changes from config.ini)
+  status           Show whether it is running and current usage
+  logs             Follow the service logs (Ctrl+C to exit)
+  report [YYYY-MM] Generate the monthly report (current month if omitted)
+  incidents        List recorded incidents
+  clear            Wipe all collected data (samples + incidents)
+  install          Install and enable the user service
+  uninstall        Remove the user service (keeps data)
+  config           Open config.ini in the default editor
+  help             Show this help
+
+Examples:
+  cassie start
+  cassie status
+  cassie report 2026-09
+EOF
+}
+
+need_service_file() {
+    if [ ! -f "$CASSIE_HOME/$SERVICE" ]; then
+        echo "Service file $SERVICE not found in $CASSIE_HOME" >&2
+        exit 1
+    fi
+}
+
+cmd="${1:-help}"
+shift || true
+
+case "$cmd" in
+    install)
+        need_service_file
+        # Local, gitignored copies of the templates; never overwrite yours.
+        for f in config.ini CONTEXT.md; do
+            [ -f "$CASSIE_HOME/$f" ] || cp "$CASSIE_HOME/$f.example" "$CASSIE_HOME/$f"
+        done
+        mkdir -p "$HOME/.config/systemd/user"
+        # Rewrite the unit paths to the real install directory, relative to
+        # HOME (so systemd resolves %h). This keeps the committed .service
+        # generic while each user installs from wherever they cloned it.
+        rel="${CASSIE_HOME#$HOME/}"
+        sed -E "s#(ExecStart=$PY ).*/run.py run#\1%h/${rel}/run.py run#; \
+                s#(WorkingDirectory=).*#\1%h/${rel}#" \
+            "$CASSIE_HOME/$SERVICE" > "$HOME/.config/systemd/user/$SERVICE"
+        systemctl --user daemon-reload
+        systemctl --user enable --now "$SERVICE"
+        echo "Cassandra installed and watching. See: cassie status"
+        ;;
+    uninstall)
+        systemctl --user disable --now "$SERVICE" 2>/dev/null || true
+        rm -f "$HOME/.config/systemd/user/$SERVICE"
+        systemctl --user daemon-reload
+        echo "Service removed. Your data and reports were preserved."
+        ;;
+    start)
+        systemctl --user start "$SERVICE" && echo "Cassandra watching."
+        ;;
+    stop)
+        systemctl --user stop "$SERVICE" && echo "Cassandra silent."
+        ;;
+    restart)
+        systemctl --user restart "$SERVICE" && echo "Cassandra restarted."
+        ;;
+    status)
+        systemctl --user status "$SERVICE" --no-pager || true
+        echo
+        echo "Cassandra's own current usage:"
+        systemctl --user show "$SERVICE" -p MemoryCurrent -p CPUUsageNSec 2>/dev/null \
+            | sed 's/^/  /'
+        ;;
+    logs)
+        journalctl --user -u "$SERVICE" -f
+        ;;
+    report)
+        "$PY" "$CASSIE_HOME/run.py" report "$@"
+        ;;
+    incidents)
+        "$PY" "$CASSIE_HOME/run.py" incidents
+        ;;
+    clear)
+        "$PY" "$CASSIE_HOME/run.py" clear
+        ;;
+    config)
+        [ -f "$CASSIE_HOME/config.ini" ] || cp "$CASSIE_HOME/config.ini.example" "$CASSIE_HOME/config.ini"
+        "${EDITOR:-nano}" "$CASSIE_HOME/config.ini"
+        ;;
+    help|-h|--help)
+        usage
+        ;;
+    *)
+        echo "Unknown command: $cmd" >&2
+        echo
+        usage
+        exit 1
+        ;;
+esac

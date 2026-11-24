@@ -1,0 +1,3 @@
+# Cassandra runs on the Python standard library only (no runtime dependencies).
+# It relies on system tools available by default on Linux: curl, ping, getent,
+# pgrep, notify-send (optional).

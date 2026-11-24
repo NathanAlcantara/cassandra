@@ -1,0 +1,130 @@
+# CONTEXT.md — Briefing for analyzing Cassandra's reports
+
+> Copy this file to `CONTEXT.md` (`cassie install` does it if missing) and fill
+> in the `<...>` parts with your own machine and environment. `CONTEXT.md` is
+> gitignored: it describes your workplace, so it stays local.
+>
+> **Cassandra** is a lightweight resource-bottleneck monitor. This file provides
+> the context needed to interpret the incident reports
+> (`incidents/incident_*.md`) and the monthly summary (`report_YYYY-MM.md`).
+> Deliver this file TOGETHER with the reports when analyzing with an AI or
+> forwarding them to IT. Without it, the raw data yields a generic analysis;
+> with it, the analysis becomes precise.
+
+## Analyst role
+
+You are a workstation performance analyst. Your goal is, from the recorded
+incidents, to **identify the root cause** of freezes and slowness and to
+**separate machine problems** (local resources) from **network/corporate
+infrastructure problems** (VPN/ZTNA, company services). The final audience is
+the company's IT team, which decides on hardware upgrades or infrastructure
+improvements. Prioritize objective evidence and temporal correlation; avoid
+speculating without data.
+
+## The machine
+
+- **CPU model:** <e.g. Intel Core i7-XXXX (N threads)>
+- **Total RAM:** <e.g. 16 GB>
+- **Swap:** <e.g. 8 GB zram + 4 GB swap file on disk>
+- **Disk:** <size, type (NVMe/SATA), % used>
+- **OS:** <distro, version, kernel>
+- **Usage profile:** <e.g. developer: browser, IDE, Docker, chat apps>
+- **Tuning already applied:** <what you already did, so the analysis does not
+  suggest it again>
+
+## Memory demand (the upgrade metric)
+
+`mem_demand_gb` = RAM in use − RAM used by zram + uncompressed size of the data
+held in zram. It is how much memory the workload really asks for, comparable to
+the physical RAM. **Demand above physical RAM means the workload does not fit
+in the machine**: zram keeps it running by compressing the overflow, paying in
+CPU. zram hides the shortage; it does not remove it.
+
+With zram, RAM exhaustion looks different from a disk-swap machine: swap fills
+(zram first) and PSI memory rises, but disk PSI io stays low because the
+overflow goes to compressed RAM, not to the disk. Disk I/O pressure appears
+only once zram is full and the disk swap file starts being used.
+
+## How to interpret the metrics (PSI is the key)
+
+The monitor relies mainly on the Linux kernel's **PSI (Pressure Stall
+Information)** (`/proc/pressure/*`), which measures **how long tasks were
+stalled waiting for a resource**. It is the most faithful indicator of a real
+freeze:
+
+- **High PSI memory (full)** + **free swap ~0%** + **low available RAM**
+  = the machine is *thrashing* (moving pages between RAM and disk for lack of
+  memory). **This is the RAM-driven freeze pattern.**
+- **High PSI io (full) ACCOMPANIED by high PSI memory and exhausted swap**
+  = the saturated disk I/O is a **symptom** of the thrashing, it does **NOT**
+  mean a slow or full disk. The cause is memory, not disk. Do not confuse them.
+- **High PSI io ALONE** (with RAM to spare) = then it is genuine disk I/O.
+- **High PSI cpu (some)** = a queue of processes waiting for CPU. Read from
+  the user session (`user.slice`): the system-wide value also counts CPU-capped
+  system/corporate agents and is not a user-facing signal.
+
+Rule of thumb: when memory and disk spike together with swap at zero, the root
+cause is **lack of RAM**. The disk is a victim, not the culprit.
+
+## Process glossary (what each name means)
+
+List the process names that show up in the reports and what they are, above
+all mandatory software you cannot remove (antivirus/EDR, VPN/ZTNA client,
+inventory or patching agents). Example format:
+
+- **`<process-name>`** — <what it is>. <Mandatory/corporate or user-adjustable>.
+  Uses ~<N> MB.
+- **`code`, `obsidian`, `slack`** — Electron apps (each embeds its own
+  Chromium + Node.js; ~0.3–1.6 GB each).
+- **`firefox` / `Isolated Web Co`** — browser tabs isolated in their own
+  processes; one heavy web-app tab can become several processes.
+
+## Network: how corporate access works
+
+Describe how you reach company services: traditional VPN (a `tun` interface),
+ZTNA (a local proxy that rewrites DNS, no tunnel interface), or direct.
+
+- **`<service-name>`** — <what it is, how it is reached, whether it answers
+  ping>. It is one of the `[network] targets` in `config.ini`.
+- <Anything unusual, e.g. external sites forced through the corporate path.>
+
+**How to separate blame in network incidents:**
+- Low latency to the public reference target (**8.8.8.8** by default)
+  = the user's local internet is fine.
+- If, with good local internet AND an idle machine, access to the monitored
+  services degrades (timeout `curl rc=28`, connection failure `rc=7`/`rc=6`,
+  response TTFB > 3 s, on 2 consecutive probes) → the bottleneck is in the
+  **VPN/ZTNA path / company infrastructure**, not the equipment.
+- **Caution:** if the machine is RAM/CPU-saturated at the same instant, the
+  network failures may be a **consequence** of the local freeze, not the infra.
+  Always correlate the time of the network failure with the RAM/CPU state.
+
+Normal observed baseline (healthy machine): <e.g. service TTFB ~0.5 s;
+8.8.8.8 RTT ~15 ms>.
+
+## curl error codes (in the network reasons)
+
+- `rc=28` = timeout (service took too long / did not respond in time)
+- `rc=7` = failed to connect (connection refused / path unavailable)
+- `rc=6` = failed to resolve host (DNS)
+
+## What constitutes an incident
+
+An incident is recorded only when the condition is **sustained** (~30 s), not
+isolated spikes. Each incident has a start, end, duration, category (memory /
+cpu / disk / network, or combinations), reasons, resource peak, the top RAM
+processes at the moment, and the network state.
+
+## Guidance for the final analysis
+
+For each incident, produce:
+1. The **likely root cause** in one sentence (e.g. "RAM exhaustion leading to
+   thrashing").
+2. The **processes that contributed most**, and whether they are mandatory
+   corporate software (context for IT) or user-adjustable.
+3. If there is a network failure, **classify** whether it was a likely cause
+   (infra/VPN/ZTNA) or a consequence (saturated machine), using temporal
+   correlation.
+4. In the conclusion, distinguish what is fixable by **user action** (closing
+   apps, removing extensions) from what requires **company action** (RAM
+   upgrade, infra improvement).

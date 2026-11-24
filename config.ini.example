@@ -1,0 +1,107 @@
+[general]
+# Sampling interval for local resources (seconds).
+# 5s is practically invisible on CPU. Do not go below this without reason.
+sample_interval_sec = 5
+
+# Network probing interval (seconds). Network is more expensive (curl/ping),
+# so it runs less often.
+network_interval_sec = 60
+
+# How many consecutive bad samples define a "sustained" incident.
+# Avoids recording isolated, harmless spikes.
+# With sample_interval_sec=5, 6 samples = ~30s sustained.
+sustained_samples = 6
+
+# After an incident ends, how many consecutive "good" samples confirm the
+# machine has recovered (so it can notify safely).
+recovery_samples = 6
+
+# Output paths (relative to the project directory, or absolute).
+db_path = monitor.db
+reports_dir = reports
+
+# Post-incident notification via notify-send (only fires AFTER the bottleneck
+# has passed).
+notify_after_incident = true
+
+# Command used to open the incident report when you click the notification's
+# "Open report" action. Default opens with the system's default markdown app.
+# Set a specific command (e.g. 'code', 'gnome-text-editor') if xdg-open does
+# not reliably open .md files in your environment.
+open_command = code
+
+# How long the incident notification stays on screen, in milliseconds.
+# Normal urgency (not intrusive). GNOME reveals the action button on hover, so
+# a generous value helps. Set 0 to keep it until dismissed (persistent).
+notification_timeout_ms = 20000
+
+[cpu]
+# CPU usage (%) considered saturation.
+usage_pct = 90
+# PSI cpu "some avg10": time (%) tasks were stalled waiting for CPU.
+# Read from the user session cgroup (user.slice) when available: the
+# system-wide value also counts throttled corporate agents and stays high
+# even on an idle machine.
+# Complements raw usage — it is the real "CPU queue" signal.
+psi_some_avg10 = 25.0
+
+[memory]
+# Available RAM below this % of total = memory pressure.
+available_pct_min = 6
+# Free swap below this % of total = swap nearly exhausted (thrashing).
+swap_free_pct_min = 10
+# PSI memory "full avg10": time (%) everything was stalled waiting for memory.
+# This is the best predictor of a RAM-driven freeze.
+psi_full_avg10 = 5.0
+
+[disk]
+# I/O: PSI io "full avg10" (%) — saturated disk choking the system.
+psi_full_avg10 = 20.0
+# Space: alert when a partition goes above this usage %.
+space_used_pct = 90
+
+[network]
+# Targets monitored over HTTPS :443 (e.g. company services behind VPN/ZTNA).
+# Format: name|url , name|url
+targets = github|https://github.com , intranet|https://intranet.example.com
+
+# Public reference target (baseline RTT of your local internet, outside ZTNA).
+public_ref = 8.8.8.8
+
+# Time to first byte (s) above which we consider degradation. TTFB measures
+# how fast the server/path answers; total time also includes downloading the
+# page body (github.com is ~540 KB) and is not a latency signal.
+# Typical baseline: TTFB ~0.5s. 3s is clearly abnormal.
+http_ttfb_warn_sec = 3.0
+
+# Consecutive bad probes (one every network_interval_sec) before network counts
+# toward an incident. 2 = degradation lasting at least ~1 min; a single blip is
+# ignored.
+sustained_probes = 2
+
+# Hard timeout per probe (s). Above this = connection failure (incident).
+http_timeout_sec = 12
+
+# ZTNA proxy process to check (if it dies, ZTNA is down). Leave empty to skip.
+ztna_process = /opt/forticlient/ztproxy
+
+[pwa_watch]
+# Watches a PWA (e.g. Teams) that leaks memory and WARNS when it goes over the
+# cap so you can reload it (Ctrl+R) — reclaiming RAM without closing the app.
+# The warning only fires at a SAFE moment (no active incident) and respects a
+# minimum interval between warnings (cooldown) so it does not nag.
+#
+# DISABLED: testing showed Teams opens already at ~2.4GB (structural floor, not
+# a leak), so reloading does not reclaim significant RAM. Re-enable by setting
+# enabled to true if some PWA of yours actually leaks over time.
+enabled = false
+# app-id of the Chrome PWA to watch. Discover it with:
+#   ps -eo args | grep -o 'app-id=[a-z]*'
+app_id = cifhbcnohmdccbgoicgdjpfamggdegmo
+# Friendly name shown in the warning.
+label = Teams
+# RAM cap (MB) for the whole PWA tree. Observed baseline: ~1.4GB after 5h.
+# 1200 MB warns before it gets critical, still leaving room to reload.
+threshold_mb = 1200
+# Minimum interval between warnings for the same PWA (minutes).
+cooldown_min = 60

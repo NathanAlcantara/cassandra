@@ -1,0 +1,5 @@
+pre-commit:
+  commands:
+    tests:
+      glob: "*.py"
+      run: python3 -m pytest -q

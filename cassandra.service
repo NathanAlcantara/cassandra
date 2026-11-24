@@ -1,0 +1,38 @@
+[Unit]
+Description=Cassandra - lightweight resource-bottleneck monitor
+# Runs in the user session; stops on logout.
+After=graphical-session.target
+
+[Service]
+Type=simple
+# Installation path. The 'cassie install' command automatically rewrites these
+# paths to the real directory where you cloned the project (relative to HOME,
+# via %h). The values below are just an example default.
+ExecStart=/usr/bin/python3 %h/cassandra/run.py run
+WorkingDirectory=%h/cassandra
+
+# --- Leanness guarantees: Cassandra must NEVER compete for resources ---
+# Lowest CPU priority (19 = lowest).
+Nice=19
+# "idle" scheduling policy: only uses CPU when nobody else wants it.
+CPUSchedulingPolicy=idle
+# Lowest disk I/O priority (idle class).
+IOSchedulingClass=idle
+IOSchedulingPriority=7
+
+# --- Safety belts via cgroup (hard limits) ---
+# If a bug ever makes Cassandra leak memory, the cgroup contains it.
+MemoryMax=150M
+MemoryHigh=100M
+# Cap at roughly ~5% of one CPU (average).
+CPUQuota=5%
+
+# Restart on failure, but calmly.
+Restart=on-failure
+RestartSec=30
+
+# Notifications (notify-send) need the graphical session bus.
+Environment=DISPLAY=:0
+
+[Install]
+WantedBy=default.target

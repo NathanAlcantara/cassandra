@@ -1,0 +1,31 @@
+# Cassandra runtime data (local, machine-specific)
+monitor.db
+monitor.db-shm
+monitor.db-wal
+*.db
+*.db-shm
+*.db-wal
+
+# Generated reports (contain personal data from the user's machine)
+reports/report_*.md
+reports/incidents/incident_*.md
+reports/CONTEXT.md
+
+# Your own environment: copied from the *.example files, kept local
+/CONTEXT.md
+/config.ini
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
